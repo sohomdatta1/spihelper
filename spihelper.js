@@ -756,17 +756,20 @@ async function spiHelperGenerateForm () {
   }
   if (spiHelperActionsSelected.Block || spiHelperActionsSelected.Link) {
     // eslint-disable-next-line no-useless-escape
+    
     const checkuserRegex = /{{\s*check(?:user|ip)\s*\|\s*(?:1=)?\s*([^\|}]*?)\s*(?:\|master name\s*=\s*.*)?}}/gi
     const results = pagetext.match(checkuserRegex)
     const likelyusers = []
     const likelyips = []
     const possibleusers = []
     const possibleips = []
-    likelyusers.push(spiHelperCaseName)
-    if (results) {
-      for (let i = 0; i < results.length; i++) {
-        const username = spiHelperNormalizeUsername(results[i].replace(checkuserRegex, '$1'))
-        const isIP = mw.util.isIPAddress(username, true)
+    likelyusers.push(spiHelperCaseName)    
+
+    
+    let socklist = $(`a[href$="section=${spiHelperSectionId}"]`).parents().not(':has(hr)').nextUntil('hr').find('.cuEntry').find('a:first')
+    for(let element of socklist) {
+      let username = spiHelperNormalizeUsername($(element).text())
+      const isIP = mw.util.isIPAddress(username, true)
         if (!isIP && !likelyusers.includes(username)) {
           likelyusers.push(username)
         } else if (isIP && !likelyips.includes(username)) {
@@ -776,39 +779,9 @@ async function spiHelperGenerateForm () {
           }
           likelyips.push(username)
         }
-      }
     }
-    const unnamedParameterRegex = /^\s*\d+\s*$/i
-    const socklistResults = pagetext.match(/{{\s*sock\s?list\s*([^}]*)}}/gi)
-    if (socklistResults) {
-      for (let i = 0; i < socklistResults.length; i++) {
-        const socklistMatch = socklistResults[i].match(/{{\s*sock\s?list\s*([^}]*)}}/i)[1]
-        // First split the text into parts based on the presence of a |
-        const socklistArguments = socklistMatch.split('|')
-        for (let j = 0; j < socklistArguments.length; j++) {
-          // Now try to split based on "=", if wasn't able to it means it's an unnamed argument
-          const splitArgument = socklistArguments[j].split('=')
-          let username = ''
-          if (splitArgument.length === 1) {
-            username = spiHelperNormalizeUsername(splitArgument[0])
-          } else if (unnamedParameterRegex.test(splitArgument[0])) {
-            username = spiHelperNormalizeUsername(splitArgument.slice(1).join('='))
-          }
-          if (username !== '') {
-            const isIP = mw.util.isIPAddress(username, true)
-            if (isIP && !likelyips.includes(username)) {
-              if (spiHelperSettings.displayIPv6As64 && mw.util.isIPv6Address(username, false)) {
-                likelyips.push(username.split(':').slice(0, 4).concat('0', '0', '0', '0').join(':') + '/64')
-                continue
-              }
-              likelyips.push(username)
-            } else if (!isIP && !likelyusers.includes(username)) {
-              likelyusers.push(username)
-            }
-          }
-        }
-      }
-    }
+    
+
     // eslint-disable-next-line no-useless-escape
     const userRegex = /{{[^\|}{]*?(?:user|vandal|IP|noping)[^\|}{]*?\|\s*(?:1=)?\s*([^\|}]*?)\s*}}/gi
     const userresults = pagetext.match(userRegex)
@@ -955,7 +928,7 @@ async function updateForRole (view) {
  * Archives everything on the page that's eligible for archiving
  */
 async function spiHelperOneClickArchive () {
-  'use strict'
+  'use strict'  
   spiHelperActiveOperations.set('oneClickArchive', 'running')
 
   const pagetext = await spiHelperGetPageText(spiHelperPageName, false)
@@ -1475,7 +1448,7 @@ async function spiHelperPerformActions () {
     if (needsAltmaster) {
       altmaster = prompt('Please enter the name of the alternate sockmaster: ', spiHelperCaseName) || spiHelperCaseName
     }
-
+    
     const tagNonLocalAccounts = $('#spiHelper_tagAccountsWithoutLocalAccount', $actionView).prop('checked')
     let blockingPromises
     if (spiHelperIsAdmin()) {
@@ -1513,10 +1486,10 @@ async function spiHelperPerformActions () {
       let needsPurge = false
       // True for each we need to check if the respective category (e.g.
       // "Suspected sockpuppets of Test") exists
-      const checkConfirmedCat = spiHelperTags.some((tagEntry) => tagEntry.tag === 'proven')
+      const checkConfirmedCat = spiHelperTags.some((tagEntry) => tagEntry.tag === 'proven') || spiHelperTags.some((tagEntry) => tagEntry.tag === 'confirmed')
       const checkSuspectedCat = spiHelperTags.some((tagEntry) => tagEntry.tag === 'blocked')
       const checkAltSuspectedCat = altmaster !== '' ? spiHelperTags.some((tagEntry) => tagEntry.altmasterTag !== '' && tagEntry.altmasterTag === 'suspected') : false
-      const checkAltConfirmedCat = altmaster !== '' ? spiHelperTags.some((tagEntry) => tagEntry.altmasterTag !== '' && tagEntry.altmasterTag === 'proven') : false
+      const checkAltConfirmedCat = altmaster !== '' ? spiHelperTags.some((tagEntry) => tagEntry.altmasterTag !== '' && tagEntry.altmasterTag === 'proven') || spiHelperTags.some((tagEntry) => tagEntry.altmasterTag !== '' && tagEntry.altmasterTag === 'confirmed') : false
 
       if (checkAltConfirmedCat) {
         const catname = 'Category:Wikipedia sockpuppets of ' + altmaster
@@ -1698,11 +1671,11 @@ async function spiHelperPerformActions () {
     // Archive the case
     if (spiHelperSectionId === null) {
       // Archive the whole case
-      logMessage += '\n** Archived case'
+      logMessage += '\n** Archived case'      
       await spiHelperArchiveCase()
     } else {
       // Just archive the selected section
-      logMessage += '\n** Archived section'
+      logMessage += '\n** Archived section'      
       await spiHelperArchiveCaseSection(spiHelperSectionId)
     }
   } else if (spiHelperActionsSelected.Rename && renameTarget) {
@@ -1844,8 +1817,8 @@ async function spiHelperPostMergeCleanup (originalText) {
 /**
  * Archive all closed sections of a case
  */
-async function spiHelperArchiveCase () {
-  'use strict'
+async function spiHelperArchiveCase () {  
+  'use strict'  
   let i = 0
   let previousRev = 0
   while (i < spiHelperCaseSections.length) {
@@ -1891,7 +1864,7 @@ async function spiHelperArchiveCase () {
         await spiHelperEditPage(spiHelperGetArchiveName(), '', 'Removing redirect', false, 'nochange')
       }
       // Need an await here - if we have multiple sections archiving we don't want
-      // to stomp on each other
+      // to stomp on each other      
       await spiHelperArchiveCaseSection(sectionId)
       // need to re-fetch caseSections since the section numbering probably just changed,
       // also reset our index
@@ -1910,10 +1883,18 @@ async function spiHelperArchiveCaseSection (sectionId) {
   'use strict'
   let sectionText = await spiHelperGetPageText(spiHelperPageName, true, sectionId)
   sectionText = sectionText.replace(spiHelperCaseStatusRegex, '')
-  const newarchivetext = sectionText.substring(sectionText.search(spiHelperSectionRegex))
+  const newarchivetext = sectionText.substring(sectionText.search(spiHelperSectionRegex))  
+  let archivetext = await spiHelperGetPageText(spiHelperGetArchiveName(), true)  
+
+  const $statusLine = $('<li>').appendTo($('#spiHelper_status', document))
+  //Edit conflict check
+  if(archivetext.includes(sectionText)) {
+    $statusLine.addClass('spihelper-errortext').append('b').text('Looks like the page has been archived already')
+    return      
+  }
+
 
   // Update the archive
-  let archivetext = await spiHelperGetPageText(spiHelperGetArchiveName(), true)
   if (!archivetext) {
     archivetext = '__TOC__\n{{SPIarchive notice|1=' + spiHelperCaseName + '}}\n{{SPIpriorcases}}'
   } else {
@@ -1924,8 +1905,7 @@ async function spiHelperArchiveCaseSection (sectionId) {
     'Archiving case section from [[' + spiHelperGetInterwikiPrefix() + spiHelperPageName + ']]',
     false, spiHelperSettings.watchArchive, spiHelperSettings.watchArchiveExpiry)
 
-  if (!archiveSuccess) {
-    const $statusLine = $('<li>').appendTo($('#spiHelper_status', document))
+  if (!archiveSuccess) {    
     $statusLine.addClass('spihelper-errortext').append('b').text('Failed to update archive, not removing section from case page')
     return
   }
