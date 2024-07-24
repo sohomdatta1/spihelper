@@ -3426,6 +3426,10 @@ async function spiHelperAddLink () {
   await spiHelperLoadSettings()
   await mw.loader.load('mediawiki.util')
   const initLink = mw.util.addPortletLink('p-cactions', '#', 'SPI', 'ca-spiHelper')
+  // The skin didn't have a p-cactions menu so the menu addition failed. Exit early.
+  if (!initLink) {
+    return false;
+  }
   initLink.addEventListener('click', (e) => {
     e.preventDefault()
     return spiHelperInit()
