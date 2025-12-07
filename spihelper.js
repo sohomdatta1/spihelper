@@ -612,7 +612,7 @@ async function spiHelperGenerateForm () {
     if (result) {
       casestatus = result[1]
     }
-    const canAddCURequest = (casestatus === '' || /^(?:admin|moreinfo|cumoreinfo|hold|cuhold|clerk|open)$/i.test(casestatus))
+    const canAddCURequest = (casestatus === '' || /^(?:admin|moreinfo|cumoreinfo|hold|cuhold|clerk|open|new)$/i.test(casestatus))
     const cuRequested = /^(?:CU|checkuser|CUrequest|request|cumoreinfo)$/i.test(casestatus)
     const cuEndorsed = /^(?:endorse(d)?)$/i.test(casestatus)
     const cuCompleted = /^(?:inprogress|checking|relist(ed)?|checked|completed|declined?|cudeclin(ed)?)$/i.test(casestatus)
@@ -623,13 +623,11 @@ async function spiHelperGenerateForm () {
     ]
     if (spiHelperCaseClosedRegex.test(casestatus)) {
       selectOpts.push({ label: 'Reopen', value: 'reopen', selected: false })
-    } else if (spiHelperIsClerk() && casestatus === 'clerk') {
-      // Allow clerks to change the status from clerk to open.
-      // Used when clerk assistance has been given and the case previously had the status 'open'.
-      selectOpts.push({ label: 'Mark as open', value: 'open', selected: false })
-    } else if (spiHelperIsAdmin() && casestatus === 'admin') {
-      // Allow admins to change the status to open from admin
-      // Used when admin assistance has been given to the non-admin clerk and the case previously had the status 'open'.
+    } else if (spiHelperIsClerk() || spiHelperIsAdmin()) {
+      // Allow clerks and admins to set the case from open. This can happen in three cases:
+      // 1. The case is new (no status)
+      // 2. The case is in "admin" status (i.e., waiting for an admin to do something) and that admin has done it
+      // 3. The case is in "clerk" status (i.e., waiting for a clerk to do something) and that clerk has done it
       selectOpts.push({ label: 'Mark as open', value: 'open', selected: false })
     }
     if (spiHelperIsCheckuser()) {
