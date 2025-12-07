@@ -6,12 +6,14 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.3",
     "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
     "eslint-config-wikimedia": "^0.32.3",
     "eslint-plugin-es": "^4.1.0",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-promise": "^7.2.1",
     "globals": "^16.5.0",
+    "typescript": "^5.9.3",
     "types-mediawiki": "^2.0.0"
   },
   "scripts": {
@@ -27,8 +29,5 @@
   "bugs": {
     "url": "https://github.com/GeneralNotability/spihelper/issues"
   },
-  "homepage": "https://github.com/GeneralNotability/spihelper#readme",
-  "dependencies": {
-    "eslint": "^9.39.1"
-  }
+  "homepage": "https://github.com/GeneralNotability/spihelper#readme"
 }
