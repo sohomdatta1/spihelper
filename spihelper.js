@@ -70,6 +70,7 @@ function displayMessage( message, className ) {
  * @property {boolean} acb If set, account creation is blocked
  * @property {boolean} ab Whether autoblock is enabled (for registered users)/
  *     logged-in users are blocked (for IPs)
+ * @property {boolean} ellideSummary Whether to ellide the block summary
  * @property {boolean} ntp If set, talk page access is blocked
  * @property {boolean} nem If set, email access is blocked
  * @property {string} tpn Type of talk page notice to apply on block
@@ -234,6 +235,13 @@ const spiHelperInterwikiPrefix = spiHelperGetInterwikiPrefix()
 // Values are strings representing the state - acceptable values are 'running', 'success', 'failed'
 const spiHelperActiveOperations = new Map()
 
+/**
+ * Cache of temporary-account IP lookups keyed by block-row index.
+ * Helps avoid redundant API calls when toggling the UI.
+ * @type {Map<number, { username: string, ips: string[] }>}
+ */
+const spiHelperTempAccountIpState = new Map()
+
 /* Globals to describe possible options for dropdown menus */
 
 /**
@@ -334,7 +342,7 @@ const spiHelperLinkViewURLFormats = {
 
 /* Actually put the portlets in place if needed */
 if ( mw.config.get( 'wgPageName' ).includes( 'Wikipedia:Sockpuppet_investigations/' ) &&
-  !mw.config.get( 'wgPageName' ).includes( 'Wikipedia:Sockpuppet_investigations/SPI/' ) ) {
+	!mw.config.get( 'wgPageName' ).includes( 'Wikipedia:Sockpuppet_investigations/SPI/' ) ) {
 	mw.loader.load( 'mediawiki.user' )
 	$( spiHelperAddLink )
 }
@@ -343,44 +351,44 @@ if ( mw.config.get( 'wgPageName' ).includes( 'Wikipedia:Sockpuppet_investigation
 
 const spiHelperTopViewHTML = `
 <div id="spiHelper_topViewDiv">
-  <h3>Handling SPI case</h3>
-  <select id="spiHelper_sectionSelect"></select>
-  <h4 id="spiHelper_warning" class="spihelper-errortext" hidden></h4>
-  <ul>
-    <li id="spiHelper_actionLine"  class="spiHelper_singleCaseOnly spiHelper_notOnArchive">
-      <input type="checkbox" name="spiHelper_Case_Action" id="spiHelper_Case_Action" />
-      <label for="spiHelper_Case_Action">Change case status</label>
-    </li>
-    <li id="spiHelper_spiMgmtLine"  class="spiHelper_allCasesOnly spiHelper_notOnArchive">
-      <input type="checkbox" id="spiHelper_SpiMgmt" />
-      <label for="spiHelper_SpiMgmt">Change SPI options</label>
-    </li>
-    <li id="spiHelper_blockLine" class="spiHelper_adminClerkClass">
-      <input type="checkbox" name="spiHelper_BlockTag" id="spiHelper_BlockTag" />
-      <label for="spiHelper_BlockTag">Block/tag socks</label>
-    </li>
-    <li id="spiHelper_userInfoLine" class="spiHelper_singleCaseOnly">
-      <input type="checkbox" name="spiHelper_userInfo" id="spiHelper_userInfo" />
-      <label for="spiHelper_userInfo">Sock links</label>
-    </li>
-    <li id="spiHelper_commentLine" class="spiHelper_singleCaseOnly spiHelper_notOnArchive">
-      <input type="checkbox" name="spiHelper_Comment" id="spiHelper_Comment" />
-      <label for="spiHelper_Comment">Note/comment</label>
-    </li>
-    <li id="spiHelper_closeLine" class="spiHelper_adminClerkClass spiHelper_singleCaseOnly spiHelper_notOnArchive">
-      <input type="checkbox" name="spiHelper_Close" id="spiHelper_Close" />
-      <label for="spiHelper_Close">Close case</label>
-    </li>
-    <li id="spiHelper_moveLine" class="spiHelper_clerkClass spiHelper_notOnArchive">
-      <input type="checkbox" name="spiHelper_Move" id="spiHelper_Move" />
-      <label for="spiHelper_Move" id="spiHelper_moveLabel">Move/merge full case (Clerk only)</label>
-    </li>
-    <li id="spiHelper_archiveLine" class="spiHelper_clerkClass spiHelper_notOnArchive">
-      <input type="checkbox" name="spiHelper_Archive" id="spiHelper_Archive"/>
-      <label for="spiHelper_Archive">Archive case (Clerk only)</label>
-    </li>
-  </ul>
-  <input type="button" id="spiHelper_GenerateForm" name="spiHelper_GenerateForm" value="Continue" />
+	<h3>Handling SPI case</h3>
+	<select id="spiHelper_sectionSelect"></select>
+	<h4 id="spiHelper_warning" class="spihelper-errortext" hidden></h4>
+	<ul>
+		<li id="spiHelper_actionLine"  class="spiHelper_singleCaseOnly spiHelper_notOnArchive">
+			<input type="checkbox" name="spiHelper_Case_Action" id="spiHelper_Case_Action" />
+			<label for="spiHelper_Case_Action">Change case status</label>
+		</li>
+		<li id="spiHelper_spiMgmtLine"  class="spiHelper_allCasesOnly spiHelper_notOnArchive">
+			<input type="checkbox" id="spiHelper_SpiMgmt" />
+			<label for="spiHelper_SpiMgmt">Change SPI options</label>
+		</li>
+		<li id="spiHelper_blockLine" class="spiHelper_adminClerkClass">
+			<input type="checkbox" name="spiHelper_BlockTag" id="spiHelper_BlockTag" />
+			<label for="spiHelper_BlockTag">Block/tag socks</label>
+		</li>
+		<li id="spiHelper_userInfoLine" class="spiHelper_singleCaseOnly">
+			<input type="checkbox" name="spiHelper_userInfo" id="spiHelper_userInfo" />
+			<label for="spiHelper_userInfo">Sock links</label>
+		</li>
+		<li id="spiHelper_commentLine" class="spiHelper_singleCaseOnly spiHelper_notOnArchive">
+			<input type="checkbox" name="spiHelper_Comment" id="spiHelper_Comment" />
+			<label for="spiHelper_Comment">Note/comment</label>
+		</li>
+		<li id="spiHelper_closeLine" class="spiHelper_adminClerkClass spiHelper_singleCaseOnly spiHelper_notOnArchive">
+			<input type="checkbox" name="spiHelper_Close" id="spiHelper_Close" />
+			<label for="spiHelper_Close">Close case</label>
+		</li>
+		<li id="spiHelper_moveLine" class="spiHelper_clerkClass spiHelper_notOnArchive">
+			<input type="checkbox" name="spiHelper_Move" id="spiHelper_Move" />
+			<label for="spiHelper_Move" id="spiHelper_moveLabel">Move/merge full case (Clerk only)</label>
+		</li>
+		<li id="spiHelper_archiveLine" class="spiHelper_clerkClass spiHelper_notOnArchive">
+			<input type="checkbox" name="spiHelper_Archive" id="spiHelper_Archive"/>
+			<label for="spiHelper_Archive">Archive case (Clerk only)</label>
+		</li>
+	</ul>
+	<input type="button" id="spiHelper_GenerateForm" name="spiHelper_GenerateForm" value="Continue" />
 </div>
 `
 
@@ -458,157 +466,158 @@ async function spiHelperInit() {
 
 const spiHelperActionViewHTML = `
 <div id="spiHelper_actionViewDiv">
-  <small><a id="spiHelper_backLink">Back to top menu</a></small>
-  <br>
-  <h3>Handling SPI case</h3>
-  <div id="spiHelper_actionView">
-    <h4>Changing case status</h4>
-    <label for="spiHelper_CaseAction">New status:</label>
-    <select id="spiHelper_CaseAction"></select>
-  </div>
-  <div id="spiHelper_spiMgmtView">
-    <h4>Changing SPI settings</h4>
-    <ul>
-      <li>
-        <input type="checkbox" id="spiHelper_spiMgmt_crosswiki" />
-        <label for="spiHelper_spiMgmt_crosswiki">Case is crosswiki</label>
-      </li>
-      <li>
-        <input type="checkbox" id="spiHelper_spiMgmt_deny" />
-        <label for="spiHelper_spiMgmt_deny">Socks should not be tagged per DENY</label>
-      </li>
-      <li>
-        <input type="checkbox" id="spiHelper_spiMgmt_notalk" />
-        <label for="spiHelper_spiMgmt_notalk">Socks should have talk page and email access revoked due to past abuse</label>
-      </li>
-    </ul>
-  </div>
-  <div id="spiHelper_sockLinksView">
-    <h4 id="spiHelper_sockLinksHeader">Useful links for socks</h4>
-    <table id="spiHelper_userInfoTable" style="border-collapse:collapse;">
-      <tr>
-        <th>Username</th>
-        <th><span title="Editor interaction analyser" class="rt-commentedText spihelper-hovertext">Interaction analyser</span></th>
-        <th><span title="Interaction timeline" class="rt-commentedText spihelper-hovertext">Interaction timeline</span></th>
-        <th><span title="Timecard comparison - SPI tools" class="rt-commentedText spihelper-hovertext">Timecard</span></th>
-        <th class="spiHelper_adminClass"><span title="Consolidated timeline (login needed) - SPI tools" class="rt-commentedText spihelper-hovertext">Consolidated timeline</span></th>
-        <th class="spiHelper_adminClass"><span title="Pages - SPI tools (login needed)" class="rt-commentedText spihelper-hovertext">Pages</span></th>
-        <th class="spiHelper_cuClass"><span title="CheckUser wiki search" class="rt-commentedText spihelper-hovertext">CU wiki</span></th>
-      </tr>
-      <tr style="border-bottom:2px solid black">
-        <td style="text-align:center;">(All users)</td>
-        <td style="text-align:center;"><input type="checkbox" id="spiHelper_link_editorInteractionAnalyser"/></td>
-        <td style="text-align:center;"><input type="checkbox" id="spiHelper_link_interactionTimeline"/></td>
-        <td style="text-align:center;"><input type="checkbox" id="spiHelper_link_timecardSPITools"/></td>
-        <td style="text-align:center;" class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_link_consolidatedTimelineSPITools"/></td>
-        <td style="text-align:center;" class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_link_pagesSPITools"/></td>
-        <td style="text-align:center;" class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_link_checkUserWikiSearch"/></td>
-      </tr>
-    </table>
-    <span><input type="button" id="moreSerks" value="Add Row" onclick="spiHelperAddBlankUserLine('block');"/></span>
-  </div>
-  <div id="spiHelper_blockTagView">
-    <h4 id="spiHelper_blockTagHeader">Blocking and tagging socks</h4>
-    <ul>
-      <li class="spiHelper_adminClass">
-        <input type="checkbox" name="spiHelper_noblock" id="spiHelper_noblock" />
-        <label for="spiHelper_noblock">Do not make any blocks (this overrides the individual "Blk" boxes below).</label>
-      </li>
-      <li class="spiHelper_adminClass">
-        <input type="checkbox" name="spiHelper_override" id="spiHelper_override" />
-        <label for="spiHelper_override">Override any existing blocks.</label>
-      </li>
-      <li class="spiHelper_clerkClass">
-        <input type="checkbox" checked="checked" name="spiHelper_tagAccountsWithoutLocalAccount" id="spiHelper_tagAccountsWithoutLocalAccount" />
-        <label for="spiHelper_tagAccountsWithoutLocalAccount">Tag accounts without an attached local account.</label>
-      </li>
-      <li class="spiHelper_cuClass">
-        <input type="checkbox" name="spiHelper_cublock" id="spiHelper_cublock" />
-        <label for="spiHelper_cublock">Mark blocks as Checkuser blocks.</label>
-      </li>
-      <li class="spiHelper_cuClass">
-        <input type="checkbox" name="spiHelper_cublockonly" id="spiHelper_cublockonly" />
-        <label for="spiHelper_cublockonly">
-          Suppress the usual block summary and only use {{checkuserblock-account}} and {{checkuserblock}} (no effect if "mark blocks as CU blocks" is not checked).
-        </label>
-      </li>
-      <li class="spiHelper_adminClass">
-        <input type="checkbox" checked="checked" name="spiHelper_blocknoticemaster" id="spiHelper_blocknoticemaster" />
-        <label for="spiHelper_blocknoticemaster">Add talk page notice when (re)blocking the sockmaster.</label>
-      </li>
-      <li class="spiHelper_adminClass">
-        <input type="checkbox" checked="checked" name="spiHelper_blocknoticesocks" id="spiHelper_blocknoticesocks" />
-        <label for="spiHelper_blocknoticesocks">Add talk page notice when blocking socks.</label>
-      </li>
-      <li class="spiHelper_adminClass">
-        <input type="checkbox" name="spiHelper_blanktalk" id="spiHelper_blanktalk" />
-        <label for="spiHelper_blanktalk">Blank the talk page when adding talk notices.</label>
-      </li>
-      <li>
-        <input type="checkbox" name="spiHelper_hidelocknames" id="spiHelper_hidelocknames" />
-        <label for="spiHelper_hidelocknames">Hide usernames when requesting global locks.</label>
-      </li>
-    </ul>
-    <table id="spiHelper_blockTable" style="border-collapse:collapse;">
-      <tr>
-        <th>Username</th>
-        <th class="spiHelper_adminClass"><span title="Block user" class="rt-commentedText spihelper-hovertext">Blk?</span></th>
-        <th class="spiHelper_adminClass"><span title="Block duration" class="rt-commentedText spihelper-hovertext">Duration</span></th>
-        <th class="spiHelper_adminClass"><span title="Account creation blocked" class="rt-commentedText spihelper-hovertext">ACB</span></th>
-        <th class="spiHelper_adminClass"><span title="Autoblock (for logged-in users)/Anonymous-only (for IPs)" class="rt-commentedText spihelper-hovertext">AB/AO</span></th>
-        <th class="spiHelper_adminClass"><span title="Disable talk page access" class="rt-commentedText spihelper-hovertext">NTP</span></th>
-        <th class="spiHelper_adminClass"><span title="Disable email" class="rt-commentedText spihelper-hovertext">NEM</span></th>
-        <th>Tag</th>
-        <th><span title="Tag the user with a suspected alternate master" class="rt-commentedText spihelper-hovertext">Alt Master</span></th>
-        <th><span title="Request a global lock at Meta:SRG" class="rt-commentedText spihelper-hovertext">Req Lock?</span></th>
-      </tr>
-      <tr style="border-bottom:2px solid black">
-        <td style="text-align:center;">(All users)</td>
-        <td class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_block_doblock"/></td>
-        <td class="spiHelper_adminClass"></td>
-        <td class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_block_acb" checked="checked"/></td>
-        <td class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_block_ab" checked="checked"/></td>
-        <td class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_block_tp"/></td>
-        <td class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_block_email"/></td>
-        <td><select id="spiHelper_block_tag"></select></td>
-        <td><select id="spiHelper_block_tag_altmaster"></select></td>
-  
-        <td><input type="checkbox" name="spiHelper_block_lock_all" id="spiHelper_block_lock"/></td>
-      </tr>
-    </table>
-    <span><input type="button" id="moreSerks" value="Add Row" onclick="spiHelperAddBlankUserLine('block');"/></span>
-  </div>
-  <div id="spiHelper_closeView">
-    <h4>Marking case as closed</h4>
-    <input type="checkbox" checked="checked" id="spiHelper_CloseCase" />
-    <label for="spiHelper_CloseCase">Close this SPI case</label>
-  </div>
-  <div id="spiHelper_moveView">
-    <h4 id="spiHelper_moveHeader">Move section</h4>
-    <label for="spiHelper_moveTarget">New sockmaster username: </label>
-    <input type="text" name="spiHelper_moveTarget" id="spiHelper_moveTarget" />
-  </div>
-  <div id="spiHelper_archiveView">
-    <h4>Archiving case</h4>
-    <input type="checkbox" checked="checked" name="spiHelper_ArchiveCase" id="spiHelper_ArchiveCase" />
-    <label for="spiHelper_ArchiveCase">Archive this SPI case</label>
-  </div>
-  <div id="spiHelper_commentView">
-    <h4>Comments</h4>
-    <span>
-      <select id="spiHelper_noteSelect"></select>
-      <select class="spiHelper_adminClerkClass" id="spiHelper_adminSelect"></select>
-      <select class="spiHelper_cuClass" id="spiHelper_cuSelect"></select>
-    </span>
-    <div>
-      <label for="spiHelper_CommentText">Comment:</label>
-      <textarea rows="3" cols="80" id="spiHelper_CommentText">*</textarea>
-      <div><a id="spiHelper_previewLink">Preview</a></div>
-    </div>
-    <div class="spihelper-previewbox" id="spiHelper_previewBox" hidden></div>
-  </div>
-  <br>
-  <input type="button" id="spiHelper_performActions" value="Done" />
+	<small><a id="spiHelper_backLink">Back to top menu</a></small>
+	<br>
+	<h3>Handling SPI case</h3>
+	<div id="spiHelper_actionView">
+		<h4>Changing case status</h4>
+		<label for="spiHelper_CaseAction">New status:</label>
+		<select id="spiHelper_CaseAction"></select>
+	</div>
+	<div id="spiHelper_spiMgmtView">
+		<h4>Changing SPI settings</h4>
+		<ul>
+			<li>
+				<input type="checkbox" id="spiHelper_spiMgmt_crosswiki" />
+				<label for="spiHelper_spiMgmt_crosswiki">Case is crosswiki</label>
+			</li>
+			<li>
+				<input type="checkbox" id="spiHelper_spiMgmt_deny" />
+				<label for="spiHelper_spiMgmt_deny">Socks should not be tagged per DENY</label>
+			</li>
+			<li>
+				<input type="checkbox" id="spiHelper_spiMgmt_notalk" />
+				<label for="spiHelper_spiMgmt_notalk">Socks should have talk page and email access revoked due to past abuse</label>
+			</li>
+		</ul>
+	</div>
+	<div id="spiHelper_sockLinksView">
+		<h4 id="spiHelper_sockLinksHeader">Useful links for socks</h4>
+		<table id="spiHelper_userInfoTable" style="border-collapse:collapse;">
+			<tr>
+				<th>Username</th>
+				<th><span title="Editor interaction analyser" class="rt-commentedText spihelper-hovertext">Interaction analyser</span></th>
+				<th><span title="Interaction timeline" class="rt-commentedText spihelper-hovertext">Interaction timeline</span></th>
+				<th><span title="Timecard comparison - SPI tools" class="rt-commentedText spihelper-hovertext">Timecard</span></th>
+				<th class="spiHelper_adminClass"><span title="Consolidated timeline (login needed) - SPI tools" class="rt-commentedText spihelper-hovertext">Consolidated timeline</span></th>
+				<th class="spiHelper_adminClass"><span title="Pages - SPI tools (login needed)" class="rt-commentedText spihelper-hovertext">Pages</span></th>
+				<th class="spiHelper_cuClass"><span title="CheckUser wiki search" class="rt-commentedText spihelper-hovertext">CU wiki</span></th>
+			</tr>
+			<tr style="border-bottom:2px solid black">
+				<td style="text-align:center;">(All users)</td>
+				<td style="text-align:center;"><input type="checkbox" id="spiHelper_link_editorInteractionAnalyser"/></td>
+				<td style="text-align:center;"><input type="checkbox" id="spiHelper_link_interactionTimeline"/></td>
+				<td style="text-align:center;"><input type="checkbox" id="spiHelper_link_timecardSPITools"/></td>
+				<td style="text-align:center;" class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_link_consolidatedTimelineSPITools"/></td>
+				<td style="text-align:center;" class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_link_pagesSPITools"/></td>
+				<td style="text-align:center;" class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_link_checkUserWikiSearch"/></td>
+			</tr>
+		</table>
+		<span><input type="button" id="moreSerks" value="Add Row" onclick="spiHelperAddBlankUserLine('block');"/></span>
+	</div>
+	<div id="spiHelper_blockTagView">
+		<h4 id="spiHelper_blockTagHeader">Blocking and tagging socks</h4>
+		<ul>
+			<li class="spiHelper_adminClass">
+				<input type="checkbox" name="spiHelper_noblock" id="spiHelper_noblock" />
+				<label for="spiHelper_noblock">Do not make any blocks (this overrides the individual "Blk" boxes below).</label>
+			</li>
+			<li class="spiHelper_adminClass">
+				<input type="checkbox" name="spiHelper_override" id="spiHelper_override" />
+				<label for="spiHelper_override">Override any existing blocks.</label>
+			</li>
+			<li class="spiHelper_clerkClass">
+				<input type="checkbox" checked="checked" name="spiHelper_tagAccountsWithoutLocalAccount" id="spiHelper_tagAccountsWithoutLocalAccount" />
+				<label for="spiHelper_tagAccountsWithoutLocalAccount">Tag accounts without an attached local account.</label>
+			</li>
+			<li class="spiHelper_cuClass">
+				<input type="checkbox" name="spiHelper_cublock" id="spiHelper_cublock" />
+				<label for="spiHelper_cublock">Mark blocks as Checkuser blocks.</label>
+			</li>
+			<li class="spiHelper_cuClass">
+				<input type="checkbox" name="spiHelper_cublockonly" id="spiHelper_cublockonly" />
+				<label for="spiHelper_cublockonly">
+					Suppress the usual block summary and only use {{checkuserblock-account}} and {{checkuserblock}} (no effect if "mark blocks as CU blocks" is not checked).
+				</label>
+			</li>
+			<li class="spiHelper_adminClass">
+				<input type="checkbox" checked="checked" name="spiHelper_blocknoticemaster" id="spiHelper_blocknoticemaster" />
+				<label for="spiHelper_blocknoticemaster">Add talk page notice when (re)blocking the sockmaster.</label>
+			</li>
+			<li class="spiHelper_adminClass">
+				<input type="checkbox" checked="checked" name="spiHelper_blocknoticesocks" id="spiHelper_blocknoticesocks" />
+				<label for="spiHelper_blocknoticesocks">Add talk page notice when blocking socks.</label>
+			</li>
+			<li class="spiHelper_adminClass">
+				<input type="checkbox" name="spiHelper_blanktalk" id="spiHelper_blanktalk" />
+				<label for="spiHelper_blanktalk">Blank the talk page when adding talk notices.</label>
+			</li>
+			<li>
+				<input type="checkbox" name="spiHelper_hidelocknames" id="spiHelper_hidelocknames" />
+				<label for="spiHelper_hidelocknames">Hide usernames when requesting global locks.</label>
+			</li>
+		</ul>
+		<table id="spiHelper_blockTable" style="border-collapse:collapse;">
+			<tr>
+				<th>Username</th>
+				<th class="spiHelper_adminClass"><span title="Block user" class="rt-commentedText spihelper-hovertext">Blk?</span></th>
+				<th  class="spiHelper_adminClass"><span title="Block underlying IPs for TA" class="rt-commentedText spihelper-hovertext">Blk Ips?</span></th>
+				<th class="spiHelper_adminClass"><span title="Block duration" class="rt-commentedText spihelper-hovertext">Duration</span></th>
+				<th class="spiHelper_adminClass"><span title="Account creation blocked" class="rt-commentedText spihelper-hovertext">ACB</span></th>
+				<th class="spiHelper_adminClass"><span title="Autoblock (for logged-in users)/Anonymous-only (for IPs)" class="rt-commentedText spihelper-hovertext">AB/AO</span></th>
+				<th class="spiHelper_adminClass"><span title="Disable talk page access" class="rt-commentedText spihelper-hovertext">NTP</span></th>
+				<th class="spiHelper_adminClass"><span title="Disable email" class="rt-commentedText spihelper-hovertext">NEM</span></th>
+				<th>Tag</th>
+				<th><span title="Tag the user with a suspected alternate master" class="rt-commentedText spihelper-hovertext">Alt Master</span></th>
+				<th><span title="Request a global lock at Meta:SRG" class="rt-commentedText spihelper-hovertext">Req Lock?</span></th>
+			</tr>
+			<tr style="border-bottom:2px solid black">
+				<td style="text-align:center;">(All users)</td>
+				<td class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_block_doblock"/></td>
+				<td class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_block_temporaryaccountips"/></td>
+				<td class="spiHelper_adminClass"></td>
+				<td class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_block_acb" checked="checked"/></td>
+				<td class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_block_ab" checked="checked"/></td>
+				<td class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_block_tp"/></td>
+				<td class="spiHelper_adminClass"><input type="checkbox" id="spiHelper_block_email"/></td>
+				<td><select id="spiHelper_block_tag"></select></td>
+				<td><select id="spiHelper_block_tag_altmaster"></select></td>
+				<td><input type="checkbox" name="spiHelper_block_lock_all" id="spiHelper_block_lock"/></td>
+			</tr>
+		</table>
+		<span><input type="button" id="moreSerks" value="Add Row" onclick="spiHelperAddBlankUserLine('block');"/></span>
+	</div>
+	<div id="spiHelper_closeView">
+		<h4>Marking case as closed</h4>
+		<input type="checkbox" checked="checked" id="spiHelper_CloseCase" />
+		<label for="spiHelper_CloseCase">Close this SPI case</label>
+	</div>
+	<div id="spiHelper_moveView">
+		<h4 id="spiHelper_moveHeader">Move section</h4>
+		<label for="spiHelper_moveTarget">New sockmaster username: </label>
+		<input type="text" name="spiHelper_moveTarget" id="spiHelper_moveTarget" />
+	</div>
+	<div id="spiHelper_archiveView">
+		<h4>Archiving case</h4>
+		<input type="checkbox" checked="checked" name="spiHelper_ArchiveCase" id="spiHelper_ArchiveCase" />
+		<label for="spiHelper_ArchiveCase">Archive this SPI case</label>
+	</div>
+	<div id="spiHelper_commentView">
+		<h4>Comments</h4>
+		<span>
+			<select id="spiHelper_noteSelect"></select>
+			<select class="spiHelper_adminClerkClass" id="spiHelper_adminSelect"></select>
+			<select class="spiHelper_cuClass" id="spiHelper_cuSelect"></select>
+		</span>
+		<div>
+			<label for="spiHelper_CommentText">Comment:</label>
+			<textarea rows="3" cols="80" id="spiHelper_CommentText">*</textarea>
+			<div><a id="spiHelper_previewLink">Preview</a></div>
+		</div>
+		<div class="spihelper-previewbox" id="spiHelper_previewBox" hidden></div>
+	</div>
+	<br>
+	<input type="button" id="spiHelper_performActions" value="Done" />
 </div>
 `
 /**
@@ -635,9 +644,9 @@ async function spiHelperGenerateForm() {
 	spiHelperActionsSelected.SpiMgmt = $( '#spiHelper_SpiMgmt', $topView ).prop( 'checked' )
 	const pagetext = await spiHelperGetPageText( spiHelperPageName, false, spiHelperSectionId )
 	if ( !( spiHelperActionsSelected.Case_act ||
-    spiHelperActionsSelected.Note || spiHelperActionsSelected.Close ||
-    spiHelperActionsSelected.Archive || spiHelperActionsSelected.Block || spiHelperActionsSelected.Link ||
-    spiHelperActionsSelected.Rename || spiHelperActionsSelected.SpiMgmt ) ) {
+		spiHelperActionsSelected.Note || spiHelperActionsSelected.Close ||
+		spiHelperActionsSelected.Archive || spiHelperActionsSelected.Block || spiHelperActionsSelected.Link ||
+		spiHelperActionsSelected.Rename || spiHelperActionsSelected.SpiMgmt ) ) {
 		displayMessage( '' )
 		return
 	}
@@ -833,10 +842,10 @@ async function spiHelperGenerateForm() {
 				const username = spiHelperNormalizeUsername( userresults[ i ].replace( userRegex, '$1' ) )
 				const isIP = mw.util.isIPAddress( username, true )
 				if ( isIP && !possibleips.includes( username ) &&
-          !likelyips.includes( username ) ) {
+					!likelyips.includes( username ) ) {
 					possibleips.push( username )
 				} else if ( !isIP && !possibleusers.includes( username ) &&
-          !likelyusers.includes( username ) ) {
+					!likelyusers.includes( username ) ) {
 					possibleusers.push( username )
 				}
 			}
@@ -851,6 +860,9 @@ async function spiHelperGenerateForm() {
 			}
 			// Wire up the "select all" options
 			$( '#spiHelper_block_doblock', $actionView ).on( 'click', ( e ) => {
+				spiHelperSetAllTableColumnOpts( $( e.target ), 'block' )
+			} )
+			$( '#spiHelper_block_temporaryaccountips', $actionView ).on( 'click', ( e ) => {
 				spiHelperSetAllTableColumnOpts( $( e.target ), 'block' )
 			} )
 			$( '#spiHelper_block_acb', $actionView ).on( 'click', ( e ) => {
@@ -966,6 +978,180 @@ async function updateForRole( view ) {
 	}
 	if ( !( spiHelperIsAdmin() || spiHelperIsClerk() ) ) {
 		$( '.spiHelper_adminClerkClass', view ).hide()
+	}
+}
+
+/**
+ * Find IP addresses for a temporary account
+ * @param {string} tempAccount List of temporary account usernames
+ * @return {Promise<string[]>} List of IP addresses associated with the temporary accounts
+ */
+async function spiHelperFindTempAccounts( tempAccount ) {
+	'use strict'
+	const restApi = new mw.Rest()
+	/**
+	 * @type {string[]}
+	 */
+	const ipList = []
+	try {
+		const token = await new mw.Api().getToken( 'csrf' )
+		const respData = await restApi.post( `/checkuser/v0/temporaryaccount/${ encodeURIComponent( tempAccount ) }`, { token: token } )
+		for ( const ip of respData.ips ) {
+			if ( ip && !ipList.includes( ip ) ) {
+				ipList.push( ip )
+			}
+		}
+	} catch ( error ) {
+		mw.log.error( 'Failed to retrieve IPs for temporary account ' + tempAccount, error )
+		throw error
+	}
+
+	return ipList
+}
+
+/**
+ * Hide and clear the temporary-account IP controls for a given block-row.
+ *
+ * @param {number} rowId Block table row identifier
+ */
+function spiHelperClearTempAccountIpsRow( rowId ) {
+	'use strict'
+	const $row = $( '#spiHelper_block_tempaccountips_row' + rowId, document )
+	const $status = $( '#spiHelper_block_tempaccountips_status' + rowId, document )
+	const $container = $( '#spiHelper_block_tempaccountips_container' + rowId, document )
+	$row.hide()
+	if ( $status.length ) {
+		$status.text( '' ).removeClass( 'spihelper-errortext' ).hide()
+	}
+	if ( $container.length ) {
+		$container.empty()
+	}
+	spiHelperTempAccountIpState.delete( rowId )
+}
+
+/**
+ * Render the temporary-account IP controls for a block-row.
+ *
+ * @param {number} rowId Block table row identifier
+ * @param {string} username Normalized temporary account username
+ * @param {string[]} ipList IP addresses associated with the temp account
+ */
+function spiHelperRenderTempAccountIpsRow( rowId, username, ipList ) {
+	'use strict'
+	const $container = $( '#spiHelper_block_tempaccountips_container' + rowId, document )
+	if ( !$container.length ) {
+		return
+	}
+	$container.empty()
+
+	const headingText = ipList.length ? 'Underlying IPs for ' + username : 'No IP addresses found for ' + username
+	const $heading = $( '<div>' ).attr( 'style', 'font-weight:bold;' ).text( headingText )
+	if ( !ipList.length ) {
+		$heading.addClass( 'spihelper-errortext' )
+	}
+	$container.append( $heading )
+
+	if ( !ipList.length ) {
+		return
+	}
+	
+	const parentAcb = $( '#spiHelper_block_acb' + rowId, document ).prop( 'checked' )
+	const parentAb = $( '#spiHelper_block_ab' + rowId, document ).prop( 'checked' )
+	const parentNtp = $( '#spiHelper_block_tp' + rowId, document ).prop( 'checked' )
+
+	const $table = $( '<table>' ).attr( 'style', 'margin-top:0.5em;border-collapse:collapse;' ).addClass( 'spihelper-tempaccount-ips-table' )
+	const $headerRow = $( '<tr>' )
+	$headerRow.append( $( '<th>' ).text( 'Blk?' ) )
+	$headerRow.append( $( '<th>' ).text( 'IP' ) )
+	$headerRow.append( $( '<th>' ).text( 'Duration' ) )
+	$headerRow.append( $( '<th>' ).text( 'ACB' ) )
+	$headerRow.append( $( '<th>' ).text( 'AO' ) )
+	$headerRow.append( $( '<th>' ).text( 'NTP' ) )
+	$table.append( $headerRow )
+
+	for ( let index = 0; index < ipList.length; index++ ) {
+		const ip = ipList[ index ]
+		const suffix = rowId + '_' + index
+		const $ipRow = $( '<tr>' )
+		$ipRow.addClass( 'spihelper-tempaccount-ip-entry spiHelper_adminClass' )
+		$ipRow.attr( 'data-parent-id', rowId )
+		$ipRow.attr( 'data-ip-index', index )
+		$ipRow.attr( 'data-ip', ip )
+
+		$ipRow.append( $( '<td>' ).append( $( '<input>' ).attr( 'type', 'checkbox' )
+			.attr( 'id', 'spiHelper_block_tempaccountips_block_' + suffix ).prop( 'checked', true ) ) )
+		$ipRow.append( $( '<td>' ).text( ip ) )
+		$ipRow.append( $( '<td>' ).append( $( '<input>' ).attr( 'type', 'text' )
+			.attr( 'id', 'spiHelper_block_tempaccountips_duration_' + suffix ).val( '1 week' )
+			.addClass( '.spihelper-widthlimit' ) ) )
+		$ipRow.append( $( '<td>' ).append( $( '<input>' ).attr( 'type', 'checkbox' )
+			.attr( 'id', 'spiHelper_block_tempaccountips_acb_' + suffix ).prop( 'checked', parentAcb ) ) )
+		$ipRow.append( $( '<td>' ).append( $( '<input>' ).attr( 'type', 'checkbox' )
+			.attr( 'id', 'spiHelper_block_tempaccountips_ab_' + suffix ).prop( 'checked', parentAb ) ) )
+		$ipRow.append( $( '<td>' ).append( $( '<input>' ).attr( 'type', 'checkbox' )
+			.attr( 'id', 'spiHelper_block_tempaccountips_tp_' + suffix ).prop( 'checked', parentNtp ) ) )
+		$table.append( $ipRow )
+	}
+
+	$container.append( $table )
+}
+
+/**
+ * Ensure the temporary-account IP controls for a block-row are visible, fetching data when needed.
+ *
+ * @param {number} rowId Block table row identifier
+ * @return {Promise<string[]>} Resolved list of IP addresses rendered for this row
+ */
+async function spiHelperPopulateTempAccountIpsRow( rowId ) {
+	'use strict'
+	const $row = $( '#spiHelper_block_tempaccountips_row' + rowId, document )
+	const $status = $( '#spiHelper_block_tempaccountips_status' + rowId, document )
+	const $container = $( '#spiHelper_block_tempaccountips_container' + rowId, document )
+	const $checkbox = $( '#spiHelper_block_temporaryaccountips' + rowId, document )
+	if ( !$row.length || !$container.length ) {
+		return []
+	}
+	const $usernameInput = $( '#spiHelper_block_username' + rowId, document )
+	const rawValue = $usernameInput.length ? $usernameInput.val() : ''
+	const normalizedUsername = rawValue ? spiHelperNormalizeUsername( rawValue.toString() ) : ''
+	if ( !normalizedUsername || !mw.util.isTemporaryUser( normalizedUsername ) ) {
+		if ( $checkbox.length ) {
+			$checkbox.prop( 'checked', false ).prop( 'disabled', true )
+		}
+		spiHelperClearTempAccountIpsRow( rowId )
+		return []
+	}
+	if ( $checkbox.length ) {
+		$checkbox.prop( 'disabled', false )
+	}
+	$row.show()
+	updateForRole( $row )
+	const cached = spiHelperTempAccountIpState.get( rowId )
+	if ( cached && cached.username === normalizedUsername ) {
+		if ( $status.length ) {
+			$status.text( '' ).removeClass( 'spihelper-errortext' ).hide()
+		}
+		spiHelperRenderTempAccountIpsRow( rowId, normalizedUsername, cached.ips )
+		return cached.ips
+	}
+	if ( $status.length ) {
+		$status.removeClass( 'spihelper-errortext' ).text( 'Fetching IP addresses...' ).show()
+	}
+	try {
+		const ipList = await spiHelperFindTempAccounts( normalizedUsername )
+		spiHelperTempAccountIpState.set( rowId, { username: normalizedUsername, ips: ipList } )
+		if ( $status.length ) {
+			$status.text( '' ).hide()
+		}
+		spiHelperRenderTempAccountIpsRow( rowId, normalizedUsername, ipList )
+		return ipList
+	} catch ( error ) {
+		if ( $status.length ) {
+			$status.addClass( 'spihelper-errortext' ).text( 'Error retrieving IP addresses. See console for details.' ).show()
+		}
+		console.error( 'spihelper: error retrieving IP list for', normalizedUsername, error )
+		spiHelperRenderTempAccountIpsRow( rowId, normalizedUsername, [] )
+		return []
 	}
 }
 
@@ -1101,11 +1287,11 @@ async function spiHelperTagUser( tagEntry, tagNonLocalAccounts, sockmaster, altm
 async function spiHelperBlockUser( blockEntry, cuBlock, cuBlockOnly, overrideExisting, blankTalk, sockmaster ) {
 	const blockReason = await spiHelperGetUserBlockReason( blockEntry.username )
 	if ( !spiHelperIsCheckuser() && overrideExisting &&
-    spiHelperCUBlockRegex.exec( blockReason ) ) {
+		spiHelperCUBlockRegex.exec( blockReason ) ) {
 		// If you're not a checkuser, we've asked to overwrite existing blocks, and the block
 		// target has a CU block on them, check whether that was intended
 		if ( !confirm( 'User ' + blockEntry.username + ' appears to be CheckUser-blocked, are you SURE you want to re-block them?\n' +
-      'Current block message:\n' + blockReason
+			'Current block message:\n' + blockReason
 		) ) {
 			return false
 		}
@@ -1113,6 +1299,9 @@ async function spiHelperBlockUser( blockEntry, cuBlock, cuBlockOnly, overrideExi
 	const isIP = mw.util.isIPAddress( blockEntry.username, true )
 	const isIPRange = isIP && !mw.util.isIPAddress( blockEntry.username, false )
 	let blockSummary = 'Abusing [[WP:SOCK|multiple accounts]]: Please see: [[' + spiHelperInterwikiPrefix + spiHelperPageName + ']]'
+	if ( blockEntry.ellideSummary ) {
+		blockSummary = 'Abusing [[WP:SOCK|multiple accounts]]'
+	}
 	if ( spiHelperIsCheckuser() && cuBlock ) {
 		const cublockTemplate = isIP ? ( '{{checkuserblock}}' ) : ( '{{checkuserblock-account}}' )
 		if ( cuBlockOnly ) {
@@ -1122,7 +1311,7 @@ async function spiHelperBlockUser( blockEntry, cuBlock, cuBlockOnly, overrideExi
 		}
 	} else if ( isIPRange ) {
 		blockSummary = '{{rangeblock|1= ' + blockSummary +
-      ( blockEntry.acb ? '' : '|create=yes' ) + '}}'
+			( blockEntry.acb ? '' : '|create=yes' ) + '}}'
 	}
 	const blockSuccess = await spiHelperWikiBlockUser(
 		blockEntry.username,
@@ -1169,7 +1358,9 @@ async function spiHelperBlockUser( blockEntry, cuBlock, cuBlockOnly, overrideExi
 		} else {
 			newText += '{{subst:uw-sockblock|sig=yes'
 		}
-		newText += '|spi=' + spiHelperCaseName
+		if  ( !blockEntry.ellideSummary ) {
+			newText += '|spi=' + spiHelperCaseName
+		}
 		if ( blockEntry.duration === 'indefinite' || blockEntry.duration === 'infinity' ) {
 			newText += '|indef=yes'
 		} else {
@@ -1181,7 +1372,7 @@ async function spiHelperBlockUser( blockEntry, cuBlock, cuBlockOnly, overrideExi
 		if ( blockEntry.ntp ) {
 			newText += '|notalk=yes'
 		}
-		if ( isSock ) {
+		if ( isSock && !blockEntry.ellideSummary ) {
 			newText += '|master=' + sockmaster
 		}
 		newText += '}}'
@@ -1194,8 +1385,12 @@ async function spiHelperBlockUser( blockEntry, cuBlock, cuBlockOnly, overrideExi
 		}
 		// Hardcode the watch setting to 'nochange' since we will have either watched or not watched based on the _boolean_
 		// watchBlockedUser
+		let summary = 'Adding sockpuppetry block notice per [[' + spiHelperGetInterwikiPrefix() + spiHelperPageName + ']]'
+		if ( blockEntry.ellideSummary ) {
+			summary = 'Adding sockpuppetry block notice'
+		}
 		spiHelperEditPage( 'User talk:' + blockEntry.username,
-			newText, 'Adding sockpuppetry block notice per [[' + spiHelperGetInterwikiPrefix() + spiHelperPageName + ']]', false, 'nochange' )
+			newText, summary, false, 'nochange' )
 	}
 
 	return true
@@ -1256,10 +1451,54 @@ async function spiHelperPerformActions() {
 					const username = spiHelperNormalizeUsername( usernameValue.toString() )
 
 					if ( masterNotice && ( $( '#spiHelper_block_tag' + i, $actionView ).val().toString().includes( 'master' ) ||
-                spiHelperNormalizeUsername( spiHelperCaseName ) === username ) ) {
+								spiHelperNormalizeUsername( spiHelperCaseName ) === username ) ) {
 						noticetype = 'master'
 					} else if ( sockNotice ) {
 						noticetype = 'sock'
+					}
+
+					const blockUnderlyingIpsOfTempAccounts = $( '#spiHelper_block_temporaryaccountips' + i, $actionView ).prop( 'checked' )
+
+					if ( blockUnderlyingIpsOfTempAccounts ) {
+						const parentAcb = $( '#spiHelper_block_acb' + i, $actionView ).prop( 'checked' )
+						const parentAb = $( '#spiHelper_block_ab' + i, $actionView ).prop( 'checked' )
+						const parentNtp = $( '#spiHelper_block_tp' + i, $actionView ).prop( 'checked' )
+						const $ipEntries = $( '.spihelper-tempaccount-ip-entry[data-parent-id="' + i + '"]', $actionView )
+						if ( $ipEntries.length ) {
+							$ipEntries.each( ( _ipIdx, element ) => {
+								const $entry = $( element )
+								const ipAddress = $entry.attr( 'data-ip' )
+								const ipIndex = $entry.attr( 'data-ip-index' )
+								if ( !ipAddress || ipIndex === undefined ) {
+									return
+								}
+								const suffix = i + '_' + ipIndex
+								const $blockToggle = $( '#spiHelper_block_tempaccountips_block_' + suffix, $actionView )
+								if ( $blockToggle.length && !$blockToggle.prop( 'checked' ) ) {
+									return
+								}
+								/** @type {string} */
+								const ipDuration = $( '#spiHelper_block_tempaccountips_duration_' + suffix, $actionView ).val().toString()
+								const $ipAcb = $( '#spiHelper_block_tempaccountips_acb_' + suffix, $actionView )
+								const ipAcb = $ipAcb.length ? $ipAcb.prop( 'checked' ) : parentAcb
+								const $ipAb = $( '#spiHelper_block_tempaccountips_ab_' + suffix, $actionView )
+								const ipAb = $ipAb.length ? $ipAb.prop( 'checked' ) : parentAb
+								const $ipNtp = $( '#spiHelper_block_tempaccountips_tp_' + suffix, $actionView )
+								const ipNtp = $ipNtp.length ? $ipNtp.prop( 'checked' ) : parentNtp
+								/** @type {BlockEntry} */
+								const ipBlockEntry = {
+									username: ipAddress,
+									duration: ipDuration,
+									acb: ipAcb,
+									ab: ipAb,
+									ntp: ipNtp,
+									nem: false,
+									ellideSummary: true,
+									tpn: noticetype
+								}
+								spiHelperBlocks.push( ipBlockEntry )
+							} )
+						}
 					}
 
 					/** @type {BlockEntry} */
@@ -1352,7 +1591,7 @@ async function spiHelperPerformActions() {
 				// Skip blank usernames
 				continue
 			}
-			if ( $( '#spiHelper_link_editorInteractionAnalyser' + i, $actionView ).prop( 'checked' ) ) {
+			if ( $( '#spiHelper_link_editorIPopulnteractionAnalyser' + i, $actionView ).prop( 'checked' ) ) {
 				spiHelperUsersForLinks.editorInteractionAnalyser.push( username )
 			}
 			if ( $( '#spiHelper_link_interactionTimeline' + i, $actionView ).prop( 'checked' ) ) {
@@ -1779,7 +2018,7 @@ async function spiHelperPerformActions() {
 async function spiHelperLog( logString ) {
 	const now = new Date()
 	const dateString = now.toLocaleString( 'en', { month: 'long' } ) + ' ' +
-    now.toLocaleString( 'en', { year: 'numeric' } )
+		now.toLocaleString( 'en', { year: 'numeric' } )
 	const dateHeader = '==\\s*' + dateString + '\\s*=='
 	const dateHeaderRe = new RegExp( dateHeader, 'i' )
 	const dateHeaderReWithAnyDate = /==.*?==/i
@@ -1844,7 +2083,7 @@ async function spiHelperPostRenameCleanup( oldCasePage ) {
 	// We also want to add the previous master to the sock list
 	// We use SOCK_SECTION_RE_WITH_NEWLINE to clean up any extraneous whitespace
 	newPageText = newPageText.replace( spiHelperSockSectionWithNewlineRegex, '====Suspected sockpuppets====' +
-    '\n* {{checkuser|1=' + oldCaseName + '}} ({{clerknote}} original case name)\n' )
+		'\n* {{checkuser|1=' + oldCaseName + '}} ({{clerknote}} original case name)\n' )
 	// Also remove the new master if they're in the sock list
 	// This RE is kind of ugly. The idea is that we find everything from the level 4 heading
 	// ending with "sockpuppets" to the level 4 heading beginning with <big> and pull the checkuser
@@ -1942,9 +2181,9 @@ async function spiHelperArchiveCase() {
 	// include size. Calculate what percent of that size the archive will be if we
 	// add the current page to it - if >1, we need to archive the archive
 	const postExpandPercent =
-    ( await spiHelperGetPostExpandSize( spiHelperPageName ) +
-    await spiHelperGetPostExpandSize( spiHelperGetArchiveName() ) ) /
-    spiHelperGetMaxPostExpandSize()
+		( await spiHelperGetPostExpandSize( spiHelperPageName ) +
+		await spiHelperGetPostExpandSize( spiHelperGetArchiveName() ) ) /
+		spiHelperGetMaxPostExpandSize()
 	if ( postExpandPercent >= 1 ) {
 		// We'd overflow the archive, so move it and then archive the current page
 		// Find the first empty archive page
@@ -2203,7 +2442,7 @@ async function spiHelperMoveCaseSection( target, sectionId ) {
 	// Have to do this transform before concatenating with targetPageText so that the
 	// "originally filed" goes in the correct section
 	sectionText = sectionText.replace( spiHelperSockSectionWithNewlineRegex, '====Suspected sockpuppets====' +
-  '\n* {{checkuser|1=' + spiHelperCaseName + '}} ({{clerknote}} originally filed under this user)\n' )
+	'\n* {{checkuser|1=' + spiHelperCaseName + '}} ({{clerknote}} originally filed under this user)\n' )
 
 	if ( targetPageText === '' ) {
 		// Pre-load the split target with the SPI templates if it's empty
@@ -3116,6 +3355,7 @@ async function spiHelperGenerateBlockTableLine( name, defaultblock, id ) {
 	let block, ab, acb, ntp, nem, duration
 
 	const isIP = mw.util.isIPAddress( name, true )
+	const isTA = mw.util.isTemporaryUser( name )
 	if ( currentBlock ) {
 		block = true
 		acb = currentBlock.acb
@@ -3141,6 +3381,9 @@ async function spiHelperGenerateBlockTableLine( name, defaultblock, id ) {
 	// Block checkbox (only for admins)
 	$( '<td>' ).addClass( 'spiHelper_adminClass' ).append( $( '<input>' ).attr( 'type', 'checkbox' )
 		.attr( 'id', 'spiHelper_block_doblock' + id ).prop( 'checked', block ) ).appendTo( $row )
+	$( '<td>' ).addClass( 'spiHelper_adminClass' ).append( $( '<input>' ).attr( 'type', 'checkbox' )
+		.attr( 'id', 'spiHelper_block_temporaryaccountips' + id ).prop( 'disabled', !isTA )
+		.prop( 'checked', false ) ).appendTo( $row )
 	// Block duration (only for admins)
 	$( '<td>' ).addClass( 'spiHelper_adminClass' ).append( $( '<input>' ).attr( 'type', 'text' )
 		.attr( 'id', 'spiHelper_block_duration' + id ).val( duration )
@@ -3168,17 +3411,60 @@ async function spiHelperGenerateBlockTableLine( name, defaultblock, id ) {
 		.prop( 'disabled', isIP ).prop( 'checked', !isIP && spiHelperArchiveNoticeParams.xwiki ) ).appendTo( $row )
 	$table.append( $row )
 
+	const columnCount = $row.children().length
+	const $ipDetailRow = $( '<tr>' ).addClass( 'spiHelper_adminClass' ).attr( 'id', 'spiHelper_block_tempaccountips_row' + id ).hide()
+	const $ipDetailCell = $( '<td>' ).attr( 'colspan', columnCount )
+	const $ipStatus = $( '<div>' ).attr( 'id', 'spiHelper_block_tempaccountips_status' + id ).attr( 'style', 'margin-bottom:0.5em;' ).hide()
+	const $ipContainer = $( '<div>' ).attr( 'id', 'spiHelper_block_tempaccountips_container' + id )
+	$ipDetailCell.append( $ipStatus )
+	$ipDetailCell.append( $ipContainer )
+	$ipDetailRow.append( $ipDetailCell )
+	$table.append( $ipDetailRow )
+	updateForRole( $ipDetailRow )
+
 	// Generate the select entries
 	spiHelperGenerateSelect( 'spiHelper_block_tag' + id, spiHelperTagOptions )
 	spiHelperGenerateSelect( 'spiHelper_block_tag_altmaster' + id, spiHelperAltMasterTagOptions )
 
-	// Add onlistener events to update the global lock checkbox if the username is changed between a IP address and username
-	$( '#spiHelper_block_username' + id ).on( 'change', ( event ) => {
-		const id = $( event.target ).attr( 'id' ).replace( 'spiHelper_block_username', '' )
-		$( '#spiHelper_block_lock' + id ).prop( 'disabled', mw.util.isIPAddress( $( event.target ).val(), true ) )
+	const $usernameInput = $( '#spiHelper_block_username' + id )
+	const $lockCheckbox = $( '#spiHelper_block_lock' + id )
+	const $tempIpCheckbox = $( '#spiHelper_block_temporaryaccountips' + id )
+
+	$tempIpCheckbox.on( 'change', async () => {
+		if ( $tempIpCheckbox.prop( 'checked' ) ) {
+			await spiHelperPopulateTempAccountIpsRow( id )
+		} else {
+			spiHelperClearTempAccountIpsRow( id )
+		}
+	} )
+
+	$usernameInput.on( 'change', async ( event ) => {
+		const value = $( event.currentTarget ).val()
+		const normalizedValue = value ? spiHelperNormalizeUsername( value.toString() ) : ''
+		const isIpAddress = normalizedValue ? mw.util.isIPAddress( normalizedValue, true ) : false
+		const isTemporaryAccount = normalizedValue ? mw.util.isTemporaryUser( normalizedValue ) : false
+		$lockCheckbox.prop( 'disabled', isIpAddress )
+		if ( !isTemporaryAccount ) {
+			if ( $tempIpCheckbox.prop( 'checked' ) ) {
+				$tempIpCheckbox.prop( 'checked', false )
+			}
+			$tempIpCheckbox.prop( 'disabled', true )
+			spiHelperClearTempAccountIpsRow( id )
+			return
+		}
+		$tempIpCheckbox.prop( 'disabled', false )
+		spiHelperTempAccountIpState.delete( id )
+		if ( $tempIpCheckbox.prop( 'checked' ) ) {
+			await spiHelperPopulateTempAccountIpsRow( id, true )
+		}
 	} )
 }
 
+/**
+ * Generate a line of the links table for a particular user
+ * @param {string} username 
+ * @param {string} id 
+ */
 async function spiHelperGenerateLinksTableLine( username, id ) {
 	'use strict'
 
@@ -3235,20 +3521,20 @@ async function spiHelperSetCheckboxesBySection() {
 	const $closeBox = $( '#spiHelper_Close', $topView )
 	const $moveBox = $( '#spiHelper_Move', $topView )
 	/*
-  const $blockBox = $('#spiHelper_BlockTag', $topView)
-  const $commentBox = $('#spiHelper_Comment', $topView)
-  const $caseActionBox = $('#spiHelper_Case_Action', $topView)
-  const $spiMgmtBox = $('#spiHelper_SpiMgmt', $topView)
+	const $blockBox = $('#spiHelper_BlockTag', $topView)
+	const $commentBox = $('#spiHelper_Comment', $topView)
+	const $caseActionBox = $('#spiHelper_Case_Action', $topView)
+	const $spiMgmtBox = $('#spiHelper_SpiMgmt', $topView)
 
-  // Start by unchecking everything
-  $archiveBox.prop('checked', false)
-  $blockBox.prop('checked', false)
-  $closeBox.prop('checked', false)
-  $commentBox.prop('checked', false)
-  $moveBox.prop('checked', false)
-  $caseActionBox.prop('checked', false)
-  $spiMgmtBox.prop('checked', false)
-  */
+	// Start by unchecking everything
+	$archiveBox.prop('checked', false)
+	$blockBox.prop('checked', false)
+	$closeBox.prop('checked', false)
+	$commentBox.prop('checked', false)
+	$moveBox.prop('checked', false)
+	$caseActionBox.prop('checked', false)
+	$spiMgmtBox.prop('checked', false)
+	*/
 
 	// Enable optionally-disabled boxes
 	$closeBox.prop( 'disabled', false )
@@ -3320,8 +3606,8 @@ async function spiHelperSetCheckboxesBySection() {
 
 		// Change the label on the rename button
 		$( '#spiHelper_moveLabel', $topView ).html( 'Move case section (<span title="You probably want to move the full case, ' +
-      'select All Sections instead of a specific date in the drop-down"' +
-      'class="rt-commentedText spihelper-hovertext"><b>READ ME FIRST</b></span>)' )
+			'select All Sections instead of a specific date in the drop-down"' +
+			'class="rt-commentedText spihelper-hovertext"><b>READ ME FIRST</b></span>)' )
 	}
 	// Only show options suitable for the archive subpage when running on the archives
 	if ( spiHelperIsThisPageAnArchive ) {
@@ -3337,7 +3623,7 @@ function spiHelperUpdateArchive() {
 	// the case is closed) and rename is not checked
 	'use strict'
 	$( '#spiHelper_Archive', document ).prop( 'disabled', !( $( '#spiHelper_Close', document ).prop( 'checked' ) ||
-    $( '#spiHelper_Close', document ).prop( 'disabled' ) ) || $( '#spiHelper_Move', document ).prop( 'checked' ) )
+		$( '#spiHelper_Close', document ).prop( 'disabled' ) ) || $( '#spiHelper_Move', document ).prop( 'checked' ) )
 	if ( $( '#spiHelper_Archive', document ).prop( 'disabled' ) ) {
 		$( '#spiHelper_Archive', document ).prop( 'checked', false )
 	}
@@ -3412,14 +3698,14 @@ function spiHelperInsertTextFromSelect( source, pos = null ) {
 	const newText = source.val().toString()
 	if ( pos === null && ( selectionStart || selectionStart === 0 ) ) {
 		$textBox.val( startText.slice( 0, Math.max( 0, selectionStart ) ) +
-      newText +
-      startText.substring( selectionEnd, startText.length ) )
+			newText +
+			startText.substring( selectionEnd, startText.length ) )
 		$textBox.attr( 'selectionStart', selectionStart + newText.length )
 		$textBox.attr( 'selectionEnd', selectionEnd + newText.length )
 	} else if ( pos !== null ) {
 		$textBox.val( startText.slice( 0, Math.max( 0, pos ) ) +
-      source.val() +
-      startText.substring( pos, startText.length ) )
+			source.val() +
+			startText.substring( pos, startText.length ) )
 		$textBox.attr( 'selectionStart', selectionStart + newText.length )
 		$textBox.attr( 'selectionEnd', selectionEnd + newText.length )
 	} else {
